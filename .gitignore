@@ -1,2 +1,5 @@
 agent-venv/
 __pycache__
+TODO/
+data/
+.env
