@@ -16,11 +16,24 @@ import os
 import json
 import re
 import time
+import io
 import requests
 import feedparser
 from datetime import datetime, timedelta
 from urllib.parse import urljoin
 from pathlib import Path
+
+# Optional imports for multimodal functionality
+try:
+    import cv2
+    import numpy as np
+    from PIL import Image
+    from pdf2image import convert_from_path
+    import fitz  # PyMuPDF
+    MULTIMODAL_AVAILABLE = True
+    
+except ImportError:
+    MULTIMODAL_AVAILABLE = False
 
 
 class ArxivScraper:
@@ -37,6 +50,11 @@ class ArxivScraper:
         """
         self.data_folder = Path(data_folder)
         self.data_folder.mkdir(exist_ok=True)
+        
+        # Create subdirectories for different types of content
+        self.images_folder = self.data_folder / "images"
+        self.images_folder.mkdir(exist_ok=True)
+        
         self.base_url = "http://export.arxiv.org/api/query"
         self.papers_data = []
 
@@ -63,6 +81,49 @@ class ArxivScraper:
             "optimization",
             "analysis",
         ]
+        
+        # Initialize models for figure extraction
+        # No model initialization needed for pdf2image approach
+        
+        # Image classification keywords for filtering relevant figures
+        self.architecture_keywords = [
+            "architecture", "framework", "model", "network", "diagram", "flowchart",
+            "pipeline", "structure", "design", "schematic", "graph", "chart",
+            "figure", "fig", "workflow", "process", "algorithm", "method"
+        ]
+
+    def _check_dependencies(self):
+        """Check if required dependencies are available"""
+        if not MULTIMODAL_AVAILABLE:
+            print("⚠️ PDF image extraction requires additional packages: pdf2image, opencv-python, pillow")
+            print("   Install with: pip install pdf2image opencv-python pillow")
+            return False
+        
+        # Test pdf2image functionality (which requires Poppler)
+        try:
+            from pdf2image.exceptions import PDFInfoNotInstalledError, PDFPageCountError
+            # Try to import pdf2image and test if Poppler is available
+            test_result = convert_from_path.__doc__  # Simple check that the function exists
+            return True
+        except Exception as e:
+            print("❌ pdf2image/Poppler not properly installed!")
+            print("\n📋 Installation Instructions:")
+            print("=" * 50)
+            print("1. Install Python packages:")
+            print("   pip install pdf2image opencv-python pillow")
+            print("\n2. Install Poppler (required by pdf2image):")
+            print("   🪟 Windows:")
+            print("     - Download from: https://github.com/oschwartz10612/poppler-windows/releases")
+            print("     - Extract to C:\\poppler")
+            print("     - Add C:\\poppler\\bin to your PATH environment variable")
+            print("     - OR use conda: conda install -c conda-forge poppler")
+            print("\n   🐧 Linux (Ubuntu/Debian):")
+            print("     sudo apt-get install poppler-utils")
+            print("\n   🍎 macOS:")
+            print("     brew install poppler")
+            print("\n3. Restart your terminal/IDE after installation")
+            print("=" * 50)
+            return False
 
     def search_papers(
         self, domain, max_results=10, sort_by="submittedDate", sort_order="descending"
@@ -80,10 +141,18 @@ class ArxivScraper:
             list: List of paper dictionaries
         """
         print(f"Searching for papers in domain: {domain}")
-        print(f"Fetching {max_results} most recent papers...")
+        print(f"Fetching {max_results} papers from the last month...")
 
-        # Construct the query
-        query = f"cat:{domain}"
+        # Calculate date range for the last month
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)
+        
+        # Format dates for arXiv API (YYYYMMDD format)
+        start_date_str = start_date.strftime("%Y%m%d")
+        end_date_str = end_date.strftime("%Y%m%d")
+        
+        # Construct the query with date range
+        query = f"cat:{domain} AND submittedDate:[{start_date_str}0000 TO {end_date_str}2359]"
         params = {
             "search_query": query,
             "start": 0,
@@ -227,12 +296,10 @@ class ArxivScraper:
                 filename = f"{paper['arxiv_id']}_{safe_title}.pdf"
                 filepath = self.data_folder / filename
 
-                # Skip if already downloaded
+                # Remove existing file if it exists to always download fresh copy
                 if filepath.exists():
-                    print(f"  Already exists: {filename}")
-                    paper["downloaded"] = True
-                    paper["pdf_filename"] = filename
-                    continue
+                    print(f"  Removing existing file: {filename}")
+                    filepath.unlink()
 
                 # Download PDF
                 response = requests.get(paper["pdf_url"], stream=True, timeout=60)
@@ -337,3 +404,182 @@ class ArxivScraper:
                     :2
                 ]:  # Show first 2 methodology sentences
                     print(f"     • {method[:100]}{'...' if len(method) > 100 else ''}")
+
+    def extract_single_page_image(self, paper_data, page_number):
+        """
+        Extract a single page from PDF as image for code generation.
+        
+        Args:
+            paper_data (dict): Paper data dictionary containing pdf_filename
+            page_number (int): Page number to extract (1-based)
+            
+        Returns:
+            dict: Image information or None if failed
+        """
+        if not self._check_dependencies():
+            return None
+            
+        if not paper_data.get("pdf_filename") or not paper_data.get("downloaded"):
+            print(f"PDF not available for {paper_data['title'][:50]}...")
+            return None
+            
+        pdf_path = self.data_folder / paper_data["pdf_filename"]
+        if not pdf_path.exists():
+            print(f"PDF file not found: {pdf_path}")
+            return None
+            
+        try:
+            # Create paper-specific image folder
+            paper_image_folder = self.images_folder / paper_data["arxiv_id"]
+            paper_image_folder.mkdir(exist_ok=True)
+            
+            print(f"🔬 Extracting page {page_number} from {paper_data['title'][:50]}...")
+            
+            # Convert specific PDF page to image using pdf2image
+            try:
+                pages = convert_from_path(
+                    str(pdf_path), 
+                    dpi=200,  # Higher DPI for better code extraction
+                    first_page=page_number, 
+                    last_page=page_number
+                )
+            except Exception as e:
+                if "poppler" in str(e).lower() or "unable to get page count" in str(e).lower():
+                    print("❌ Poppler not found! Please install Poppler:")
+                    print("   Windows: Download from https://github.com/oschwartz10612/poppler-windows/releases")
+                    print("   Extract to C:\\poppler and add C:\\poppler\\bin to PATH")
+                    print("   OR use conda: conda install -c conda-forge poppler")
+                    return None
+                else:
+                    raise e
+            
+            if not pages:
+                print(f"❌ Could not extract page {page_number}")
+                return None
+                
+            page_image = pages[0]
+            
+            # Generate filename
+            image_filename = f"page_{page_number}_code_extraction.png"
+            image_path = paper_image_folder / image_filename
+            
+            # Save the page image with high quality for code extraction
+            page_image.save(image_path, "PNG", quality=95, optimize=True)
+            
+            # Create image info
+            image_info = {
+                "filename": image_filename,
+                "path": str(image_path),
+                "page_number": page_number,
+                "size": page_image.size,
+                "label": f"Page {page_number} (Code Extraction)",
+                "format": "PNG",
+                "size_bytes": image_path.stat().st_size if image_path.exists() else 0,
+                "type": "code_extraction",
+                "extraction_method": "pdf2image",
+                "dpi": 200
+            }
+            
+            print(f"✅ Successfully extracted page {page_number} for code generation")
+            return image_info
+            
+        except Exception as e:
+            print(f"❌ Error extracting page {page_number} from PDF {pdf_path}: {e}")
+            return None
+
+    def get_pdf_page_count(self, paper_data):
+        """
+        Get the total number of pages in a PDF.
+        
+        Args:
+            paper_data (dict): Paper data dictionary
+            
+        Returns:
+            int: Number of pages or 0 if error
+        """
+        if not paper_data.get("pdf_filename") or not paper_data.get("downloaded"):
+            return 0
+            
+        pdf_path = self.data_folder / paper_data["pdf_filename"]
+        if not pdf_path.exists():
+            return 0
+            
+        try:
+            # Use PyMuPDF to get page count (lighter than pdf2image)
+            import fitz  # PyMuPDF
+            doc = fitz.open(str(pdf_path))
+            page_count = len(doc)
+            doc.close()
+            return page_count
+        except Exception as e:
+            print(f"❌ Error getting page count: {e}")
+            return 0
+
+    def extract_images_from_pdf(self, paper_data):
+        """
+        DEPRECATED: This method has been replaced with on-demand page extraction.
+        Use extract_single_page_image() for code generation instead.
+        
+        This method now only provides PDF metadata without extracting all pages.
+        
+        Args:
+            paper_data (dict): Paper data dictionary containing pdf_filename
+            
+        Returns:
+            list: Empty list (pages are now extracted on-demand)
+        """
+        if not self._check_dependencies():
+            return []
+            
+        if not paper_data.get("pdf_filename") or not paper_data.get("downloaded"):
+            print(f"PDF not available for {paper_data['title'][:50]}...")
+            return []
+            
+        pdf_path = self.data_folder / paper_data["pdf_filename"]
+        if not pdf_path.exists():
+            print(f"PDF file not found: {pdf_path}")
+            return []
+            
+        try:
+            # Just get PDF metadata without extracting all pages
+            page_count = self.get_pdf_page_count(paper_data)
+            
+            # Update paper data with PDF info
+            paper_data["pdf_available"] = True
+            paper_data["total_pages"] = page_count
+            paper_data["images_extracted"] = False  # No longer auto-extracting
+            
+            print(f"📄 PDF ready for on-demand page extraction: {page_count} pages available")
+            return []  # Return empty - pages extracted on demand
+            
+        except Exception as e:
+            print(f"❌ Error processing PDF {pdf_path}: {e}")
+            return []
+    
+    
+    def deep_research_analysis(self, paper_data):
+        """
+        Perform deep research analysis with PDF preparation for on-demand code extraction.
+        
+        Args:
+            paper_data (dict): Paper data dictionary
+            
+        Returns:
+            dict: Enhanced paper data with PDF metadata
+        """
+        print(f"\n🔬 Starting deep research analysis for: {paper_data['title'][:50]}...")
+        
+        # Prepare PDF for on-demand page extraction (no bulk conversion)
+        self.extract_images_from_pdf(paper_data)
+        
+        # Add deep research metadata
+        paper_data.update({
+            "deep_research_completed": True,
+            "deep_research_timestamp": datetime.now().isoformat(),
+            "code_extraction_ready": paper_data.get("pdf_available", False)
+        })
+        
+        total_pages = paper_data.get("total_pages", 0)
+        print(f"✅ Deep research analysis completed. PDF ready with {total_pages} pages for on-demand code extraction")
+        
+        return paper_data
