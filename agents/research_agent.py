@@ -557,6 +557,82 @@ class ArxivScraper:
             return []
     
     
+    def download_from_url(self, arxiv_url):
+        """
+        Download a paper from a specific ArXiv URL.
+        
+        Args:
+            arxiv_url (str): ArXiv URL (e.g., https://arxiv.org/abs/2408.12345)
+            
+        Returns:
+            dict: Paper data dictionary or None if failed
+        """
+        import re
+        
+        # Extract arXiv ID from URL
+        arxiv_id_match = re.search(r'arxiv\.org/(?:abs|pdf)/(\d+\.\d+)', arxiv_url)
+        if not arxiv_id_match:
+            print(f"❌ Invalid ArXiv URL format: {arxiv_url}")
+            return None
+            
+        arxiv_id = arxiv_id_match.group(1)
+        
+        try:
+            print(f"🔍 Fetching paper info for {arxiv_id}...")
+            
+            # Use arXiv API to get paper metadata
+            api_url = f"http://export.arxiv.org/api/query?id_list={arxiv_id}"
+            response = requests.get(api_url, timeout=30)
+            response.raise_for_status()
+            
+            # Parse the feed
+            feed = feedparser.parse(response.content)
+            
+            if not feed.entries:
+                print(f"❌ No paper found for ID: {arxiv_id}")
+                return None
+                
+            # Extract paper data
+            entry = feed.entries[0]
+            paper_data = self.extract_paper_data(entry)
+            
+            print(f"✅ Found paper: {paper_data['title'][:50]}...")
+            
+            # Download the PDF
+            print(f"📥 Downloading PDF...")
+            self.download_pdfs([paper_data])
+            
+            return paper_data
+            
+        except Exception as e:
+            print(f"❌ Error downloading from URL {arxiv_url}: {e}")
+            return None
+
+    def search_and_download(self, domain, max_results=10):
+        """
+        Search for papers and download them in one operation.
+        
+        Args:
+            domain (str): ArXiv category
+            max_results (int): Maximum number of papers
+            
+        Returns:
+            list: List of downloaded papers
+        """
+        try:
+            # Search for papers
+            papers = self.search_papers(domain, max_results)
+            
+            if papers:
+                # Download PDFs
+                self.download_pdfs(papers)
+                
+            return papers
+            
+        except Exception as e:
+            print(f"❌ Error in search and download: {e}")
+            return []
+
     def deep_research_analysis(self, paper_data):
         """
         Perform deep research analysis with PDF preparation for on-demand code extraction.

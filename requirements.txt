@@ -81,3 +81,10 @@ wheel==0.45.1
 win-inet-pton==1.1.0
 xxhash==3.5.0
 zstandard==0.23.0
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+faiss-cpu==1.8.0
+sentence-transformers==2.7.0
+transformers==4.40.2
+accelerate==0.30.1

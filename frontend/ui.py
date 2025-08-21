@@ -2468,49 +2468,164 @@ def display_enhanced_paper_viewer(papers: list):
         title = paper["title"]
         st.markdown(
             f"""
-    <div class="quantum-paper-card">
-        <div class="paper-neural-header">
-            <div class="paper-title-quantum">
-                {title}
-            </div>
-            <div class="neural-status-indicator {status_class}">
-                {status_text}
-            </div>
+<div style="
+    background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 24px;
+    margin: 16px 0;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(0, 0, 0, 0.12)'" 
+   onmouseout="this.style.transform='translateY(0px)'; this.style.boxShadow='0 4px 16px rgba(0, 0, 0, 0.08)'">
+    
+    <!-- Subtle accent line -->
+    <div style="
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, #3b82f6, #06b6d4, #10b981);
+    "></div>
+    
+    <!-- Header Section -->
+    <div style="
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 20px;
+        gap: 16px;
+    ">
+        <div style="
+            flex: 1;
+            color: #1e293b;
+            font-size: 18px;
+            font-weight: 700;
+            line-height: 1.4;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        ">
+            {title}
         </div>
-    """,
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f"""
-                    <div class="paper-meta-neural">
-            <div class="meta-field">
-                <span class="meta-label">Authors</span>
-                <span class="meta-value">{authors_text}</span>
-            </div>
-            <div class="meta-field">
-                <span class="meta-label">ArXiv ID</span>
-                <span class="meta-value">{arxiv_id}</span>
-            </div>
-            <div class="meta-field">
-                <span class="meta-label">Published</span>
-                <span class="meta-value">{published_date}</span>
-            </div>
-            <div class="meta-field">
-                <span class="meta-label">Categories</span>
-                <span class="meta-value">{categories_text}</span>
-            </div>
+        <div style="
+            background: {'linear-gradient(135deg, #10b981, #059669)' if status_class == 'status-neural-ready' else 'linear-gradient(135deg, #f59e0b, #d97706)'};
+            color: white;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        ">
+            {status_text}
         </div>
     </div>
-                    """,
+    
+    <!-- Metadata Grid -->
+    <div style="
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+    ">
+        <div style="
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 12px 16px;
+        ">
+            <div style="
+                color: #64748b;
+                font-size: 12px;
+                font-weight: 500;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 4px;
+            ">Authors</div>
+            <div style="
+                color: #334155;
+                font-size: 14px;
+                font-weight: 500;
+                line-height: 1.3;
+            ">{authors_text}</div>
+        </div>
+        
+        <div style="
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 12px 16px;
+        ">
+            <div style="
+                color: #64748b;
+                font-size: 12px;
+                font-weight: 500;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 4px;
+            ">ArXiv ID</div>
+            <div style="
+                color: #334155;
+                font-size: 14px;
+                font-weight: 500;
+                font-family: 'JetBrains Mono', monospace;
+            ">{arxiv_id}</div>
+        </div>
+        
+        <div style="
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 12px 16px;
+        ">
+            <div style="
+                color: #64748b;
+                font-size: 12px;
+                font-weight: 500;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 4px;
+            ">Published</div>
+            <div style="
+                color: #334155;
+                font-size: 14px;
+                font-weight: 500;
+            ">{published_date}</div>
+        </div>
+        
+        <div style="
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 12px 16px;
+        ">
+            <div style="
+                color: #64748b;
+                font-size: 12px;
+                font-weight: 500;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 4px;
+            ">Categories</div>
+            <div style="
+                color: #334155;
+                font-size: 14px;
+                font-weight: 500;
+            ">{categories_text}</div>
+        </div>
+    </div>
+</div>
+            """,
             unsafe_allow_html=True,
         )
-
-        # Quantum Action Buttons
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
             if st.button(
-                "PREVIEW",
+                "Preview",
                 key=f"preview_{i}",
                 use_container_width=True,
                 help="SyntAI Document Interface",
@@ -2606,7 +2721,7 @@ def display_enhanced_paper_viewer(papers: list):
                         font-family: 'Space Grotesk', sans-serif;
                         text-shadow: 0 0 20px rgba(6, 255, 165, 0.5);
                     ">
-                        🔮 QUANTUM DOCUMENT INTERFACE 🔮
+                    DOCUMENT INTERFACE
                     </div>
                 </div>
                 """,
@@ -2627,35 +2742,14 @@ def display_enhanced_paper_viewer(papers: list):
                     if current_page_key not in st.session_state:
                         st.session_state[current_page_key] = 1
 
-                    # Quantum Page Navigation
-                    st.markdown(
-                        f"""
-                        <div style="
-                            text-align: center;
-                            background: linear-gradient(135deg, rgba(0, 212, 255, 0.1), rgba(6, 255, 165, 0.1));
-                            border: 1px solid rgba(0, 212, 255, 0.3);
-                            border-radius: 20px;
-                            padding: 1.5rem;
-                            margin: 1.5rem 0;
-                            font-family: 'JetBrains Mono', monospace;
-                            font-weight: 600;
-                            color: #00d4ff;
-                            backdrop-filter: blur(15px);
-                        ">
-                            🌌 QUANTUM SCAN: PAGE {st.session_state[current_page_key]} OF {total_pages} 🌌
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
                     # Quantum Jump Control
                     col1, col2, col3 = st.columns([1, 2, 1])
                     with col2:
                         jump_page = st.selectbox(
-                            "🚀 QUANTUM TELEPORT TO PAGE:",
+                            "TELEPORT TO PAGE:",
                             range(1, total_pages + 1),
                             index=st.session_state[current_page_key] - 1,
-                            key=f"quantum_jump_{i}",
+                            key=f"jump_{i}",
                         )
                         if jump_page != st.session_state[current_page_key]:
                             st.session_state[current_page_key] = jump_page
@@ -2698,15 +2792,11 @@ def display_enhanced_paper_viewer(papers: list):
                             col1, col2, col3 = st.columns([1, 2, 1])
                             with col2:
                                 if st.button(
-                                    "🧠 ACTIVATE NEURAL CORE ANALYSIS",
+                                    "SyntAI Analysis",
                                     key=f"quantum_neural_{i}_{st.session_state[current_page_key]}",
                                     use_container_width=True,
                                 ):
-                                    # Trigger neural analysis and store results
-                                    with st.spinner(
-                                        "QUANTUM NEURAL CORE INITIALIZING..."
-                                    ):
-                                        # Use VLM to analyze current page image
+                                    with st.spinner("SyntAI INITIALIZING..."):
                                         current_page = st.session_state[
                                             current_page_key
                                         ]
@@ -2729,9 +2819,6 @@ def display_enhanced_paper_viewer(papers: list):
                                                 st.session_state[
                                                     f"show_vlm_results_{i}_{current_page}"
                                                 ] = True
-                                                st.success(
-                                                    "🧠 Neural VLM analysis complete! Quantum patterns detected."
-                                                )
                                                 st.rerun()
                                             else:
                                                 st.error(
@@ -2742,7 +2829,6 @@ def display_enhanced_paper_viewer(papers: list):
                                                 "⚠️ Page image not found for VLM analysis"
                                             )
 
-                            # Display VLM Analysis Results
                             current_page = st.session_state[current_page_key]
                             if st.session_state.get(
                                 f"show_vlm_results_{i}_{current_page}", False
@@ -2770,7 +2856,7 @@ def display_enhanced_paper_viewer(papers: list):
                                                 font-family: 'Space Grotesk', sans-serif;
                                                 text-shadow: 0 0 20px rgba(6, 255, 165, 0.5);
                                                 margin-bottom: 2rem;
-                                            ">🧠 NEURAL VLM CORE ANALYSIS RESULTS</h3>
+                                            ">SyntAI Analysis Results</h3>
                                         </div>
                                         """,
                                         unsafe_allow_html=True,
@@ -2781,31 +2867,171 @@ def display_enhanced_paper_viewer(papers: list):
 
                                     with col1:
                                         st.markdown(
-                                            f"**📄 Content Type:** {vlm_data.get('content_type', 'Unknown')}"
+                                            f"""
+                                            <div style="
+                                            background: linear-gradient(135deg, 
+                                                rgba(6, 255, 165, 0.1) 0%, 
+                                                rgba(0, 212, 255, 0.1) 50%,
+                                                rgba(139, 69, 19, 0.05) 100%);
+                                            border: 2px solid rgba(6, 255, 165, 0.4);
+                                            border-radius: 20px;
+                                            padding: 2rem;
+                                            margin: 2rem 0;
+                                            backdrop-filter: blur(25px);
+                                        ">
+                                            Content Type: {vlm_data.get('content_type', 'Unknown')}
+                                        </div>
+                                            """,
+                                            unsafe_allow_html=True,
                                         )
+                                        # Quantum analysis display with enhanced styling
                                         st.markdown(
-                                            f"**🔬 Has Diagram:** {'Yes' if vlm_data.get('has_diagram') else 'No'}"
+                                            f"""
+                                            <div style="
+                                                background: linear-gradient(135deg, rgba(6, 255, 165, 0.1), rgba(0, 212, 255, 0.1));
+                                                border: 1px solid rgba(6, 255, 165, 0.3);
+                                                border-radius: 12px;
+                                                padding: 1rem;
+                                                margin: 0.5rem 0;
+                                                backdrop-filter: blur(10px);
+                                            ">
+                                                <span style="color: #06ffa5; font-family: 'JetBrains Mono', monospace; font-weight: 600;">
+                                                    Has Diagram: {'Yes' if vlm_data.get('has_diagram') else 'No'}
+                                                </span>
+                                            </div>
+                                            """,
+                                            unsafe_allow_html=True,
                                         )
 
                                         if vlm_data.get("explanation"):
-                                            st.markdown("**💡 Detailed Analysis:**")
-                                            st.write(vlm_data["explanation"])
+                                            st.markdown(
+                                                """
+                                                <div style="
+                                                    background: rgba(0, 212, 255, 0.05);
+                                                    border-left: 3px solid #00d4ff;
+                                                    border-radius: 8px;
+                                                    padding: 1rem;
+                                                    margin: 1rem 0;
+                                                ">
+                                                    <h4 style="color: #00d4ff; margin: 0 0 0.5rem 0; font-family: 'JetBrains Mono', monospace;">Detailed Analysis</h4>
+                                                </div>
+                                                """,
+                                                unsafe_allow_html=True,
+                                            )
+                                            st.markdown(
+                                                f"""
+                                                <div style="
+                                                    background: rgba(15, 15, 35, 0.6);
+                                                    border: 1px solid rgba(0, 212, 255, 0.2);
+                                                    border-radius: 8px;
+                                                    padding: 1rem;
+                                                    color: #e0e6ed;
+                                                    line-height: 1.6;
+                                                ">
+                                                    {vlm_data["explanation"]}
+                                                </div>
+                                                """,
+                                                unsafe_allow_html=True,
+                                            )
 
                                     with col2:
                                         if vlm_data.get("insights"):
-                                            st.markdown("**🔍 Key Insights:**")
-                                            for insight in vlm_data["insights"]:
-                                                st.write(f"• {insight}")
+                                            st.markdown(
+                                                """
+                                                <div style="
+                                                    background: rgba(91, 33, 182, 0.05);
+                                                    border-left: 3px solid #5b21b6;
+                                                    border-radius: 8px;
+                                                    padding: 1rem;
+                                                    margin: 1rem 0;
+                                                ">
+                                                    <h4 style="color: #5b21b6; margin: 0 0 0.5rem 0; font-family: 'JetBrains Mono', monospace;">Key Insights</h4>
+                                                </div>
+                                                """,
+                                                unsafe_allow_html=True,
+                                            )
+                                            for i, insight in enumerate(
+                                                vlm_data["insights"], 1
+                                            ):
+                                                st.markdown(
+                                                    f"""
+                                                    <div style="
+                                                        background: rgba(91, 33, 182, 0.08);
+                                                        border: 1px solid rgba(91, 33, 182, 0.2);
+                                                        border-radius: 6px;
+                                                        padding: 0.75rem;
+                                                        margin: 0.5rem 0;
+                                                        color: #e0e6ed;
+                                                        transition: all 0.3s ease;
+                                                    ">
+                                                        <span style="color: #5b21b6; font-weight: 600;">#{i}</span> {insight}
+                                                    </div>
+                                                    """,
+                                                    unsafe_allow_html=True,
+                                                )
 
-                                    # Additional sections
+                                    # Additional sections with quantum styling
                                     if vlm_data.get("diagram_analysis"):
-                                        st.markdown("**📊 Diagram Analysis:**")
-                                        st.write(vlm_data["diagram_analysis"])
+                                        st.markdown(
+                                            """
+                                            <div style="
+                                                background: rgba(6, 255, 165, 0.05);
+                                                border-left: 3px solid #06ffa5;
+                                                border-radius: 8px;
+                                                padding: 1rem;
+                                                margin: 1rem 0;
+                                            ">
+                                                <h4 style="color: #06ffa5; margin: 0 0 0.5rem 0; font-family: 'JetBrains Mono', monospace;">Diagram Analysis</h4>
+                                            </div>
+                                            """,
+                                            unsafe_allow_html=True,
+                                        )
+                                        st.markdown(
+                                            f"""
+                                            <div style="
+                                                background: rgba(15, 15, 35, 0.6);
+                                                border: 1px solid rgba(6, 255, 165, 0.2);
+                                                border-radius: 8px;
+                                                padding: 1rem;
+                                                color: #e0e6ed;
+                                                line-height: 1.6;
+                                            ">
+                                                {vlm_data["diagram_analysis"]}
+                                            </div>
+                                            """,
+                                            unsafe_allow_html=True,
+                                        )
 
                                     if vlm_data.get("technical_elements"):
-                                        st.markdown("**⚙️ Technical Elements:**")
-                                        st.write(vlm_data["technical_elements"])
-
+                                        st.markdown(
+                                            """
+                                            <div style="
+                                                background: rgba(255, 193, 7, 0.05);
+                                                border-left: 3px solid #ffc107;
+                                                border-radius: 8px;
+                                                padding: 1rem;
+                                                margin: 1rem 0;
+                                            ">
+                                                <h4 style="color: #ffc107; margin: 0 0 0.5rem 0; font-family: 'JetBrains Mono', monospace;"> Technical Elements</h4>
+                                            </div>
+                                            """,
+                                            unsafe_allow_html=True,
+                                        )
+                                        st.markdown(
+                                            f"""
+                                            <div style="
+                                                background: rgba(15, 15, 35, 0.6);
+                                                border: 1px solid rgba(255, 193, 7, 0.2);
+                                                border-radius: 8px;
+                                                padding: 1rem;
+                                                color: #e0e6ed;
+                                                line-height: 1.6;
+                                            ">
+                                                {vlm_data["technical_elements"]}
+                                            </div>
+                                            """,
+                                            unsafe_allow_html=True,
+                                        )
                     except Exception as e:
                         st.error(f"⚠️ Quantum interface error: {str(e)}")
 
@@ -3983,23 +4209,6 @@ def main():
     # Results dashboard
     if st.session_state.papers and not st.session_state.searching:
         st.markdown("---")
-
-        # Ultra-Futuristic Database Header
-        st.markdown(
-            f"""
-            <div class="syntai-database-header">
-                <div class="database-title">⚡ SyntAI NEURAL DATABASE ⚡</div>
-                <div class="database-subtitle">🤖 Advanced Quantum Research Intelligence • Neural Analysis Ready</div>
-                <div class="papers-count-display">
-                    <div class="count-badge">
-                        🧠 {len(st.session_state.papers)} PAPERS ACQUIRED
-                    </div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
         display_paper_viewer(st.session_state.papers)
 
     elif st.session_state.searching:
