@@ -7,6 +7,11 @@ class PaperWhispererApp {
         this.currentPage = 1;
         this.totalPages = 1;
         this.isLoading = false;
+        this.expectedPaperCount = null;
+        
+        // Comparative analysis properties
+        this.selectedPapers = new Set();
+        this.comparisonMode = false;
         
         this.init();
     }
@@ -18,7 +23,13 @@ class PaperWhispererApp {
     }
 
     setupEventListeners() {
-        // Search form
+        // Keyword search form
+        document.getElementById('keywordSearchForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.handleKeywordSearch();
+        });
+
+        // Domain search form
         document.getElementById('searchForm').addEventListener('submit', (e) => {
             e.preventDefault();
             this.handleDomainSearch();
@@ -57,6 +68,16 @@ class PaperWhispererApp {
         document.getElementById('analyzePageBtn').addEventListener('click', () => {
             this.analyzePage();
         });
+
+        // Custom date range toggle
+        document.getElementById('timeRange').addEventListener('change', (e) => {
+            this.toggleCustomDateRange(e.target.value === 'custom');
+        });
+
+        // Set max date for date inputs to today
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('startDate').max = today;
+        document.getElementById('endDate').max = today;
     }
 
     setupTabs() {
@@ -81,6 +102,124 @@ class PaperWhispererApp {
                 document.getElementById(tabId).classList.remove('hidden');
             });
         });
+    }
+
+    toggleCustomDateRange(show) {
+        const customDateRange = document.getElementById('customDateRange');
+        if (show) {
+            customDateRange.classList.remove('hidden');
+            // Set default date range (last 6 months)
+            const today = new Date();
+            const sixMonthsAgo = new Date();
+            sixMonthsAgo.setMonth(today.getMonth() - 6);
+
+            document.getElementById('startDate').value = sixMonthsAgo.toISOString().split('T')[0];
+            document.getElementById('endDate').value = today.toISOString().split('T')[0];
+        } else {
+            customDateRange.classList.add('hidden');
+            // Clear date values
+            document.getElementById('startDate').value = '';
+            document.getElementById('endDate').value = '';
+        }
+    }
+
+    async handleKeywordSearch() {
+        if (this.isLoading) return;
+
+        const keywords = document.getElementById('keywords').value.trim();
+        if (!keywords) {
+            alert('Please enter some keywords to search for.');
+            return;
+        }
+
+        const maxResults = parseInt(document.getElementById('keywordMaxResults').value);
+        const timeRange = parseInt(document.getElementById('timeRange').value);
+        const sortBy = document.getElementById('sortBy').value;
+        const clearExisting = document.getElementById('clearExistingKeyword').checked;
+
+        // Get date range parameters
+        let startDate = null;
+        let endDate = null;
+        if (timeRange === 'custom') {
+            startDate = document.getElementById('startDate').value;
+            endDate = document.getElementById('endDate').value;
+
+            if (!startDate || !endDate) {
+                alert('Please select both start and end dates for custom range.');
+                return;
+            }
+
+            if (new Date(startDate) > new Date(endDate)) {
+                alert('Start date cannot be after end date.');
+                return;
+            }
+        }
+
+        // Add spinner to search button
+        const searchButton = document.querySelector('#keywordSearchForm button[type="submit"]');
+        this.addButtonSpinner(searchButton, 'Searching...');
+
+        // Reset expected paper count for new search
+        this.expectedPaperCount = null;
+
+        this.showLoading(`Searching for: ${keywords}...`);
+
+        try {
+            const response = await fetch(`${this.apiBase}/search/keywords`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    keywords,
+                    max_results: maxResults,
+                    time_range_days: timeRange === 'custom' ? null : timeRange,
+                    sort_by: sortBy,
+                    clear_existing: clearExisting,
+                    start_date: startDate,
+                    end_date: endDate
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            // Clear current papers if not appending
+            if (clearExisting) {
+                this.currentPapers = [];
+            }
+
+            // Handle streaming response
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n');
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            this.handleSearchProgress(data);
+                        } catch (e) {
+                            console.error('Error parsing SSE data:', e);
+                        }
+                    }
+                }
+            }
+
+        } catch (error) {
+            console.error('Keyword search error:', error);
+            this.hideLoading();
+            this.showError(`Failed to search for papers: ${error.message}`);
+        } finally {
+            this.removeButtonSpinner(searchButton, 'Search Papers');
+        }
     }
 
     async handleDomainSearch() {
@@ -197,15 +336,34 @@ class PaperWhispererApp {
 
     handleSearchProgress(data) {
         if (data.type === 'progress') {
+            // Set expected paper count on first progress event
+            if (data.total && !this.expectedPaperCount) {
+                this.expectedPaperCount = data.total;
+            }
             this.updateProgress(data.current, data.total, data.message);
         } else if (data.type === 'paper') {
             this.addPaper(data.paper);
+        } else if (data.type === 'download_complete') {
+            // Downloads finished, show final progress and hide loading
+            const totalPapers = this.currentPapers.length;
+            this.updateProgress(totalPapers, totalPapers, `All ${totalPapers} papers downloaded successfully!`);
+            
+            // Small delay to show completion, then hide loading
+            setTimeout(() => {
+                this.hideLoading();
+                this.showSuccess(`Search completed! Found ${totalPapers} papers. RAG processing continues in background.`);
+                this.expectedPaperCount = null; // Reset for next search
+            }, 1000);
         } else if (data.type === 'complete') {
             this.currentPapers = data.papers || [];
             this.displayPapers();
+            this.hideLoading(); // Now hide loading as everything is complete
             this.showSuccess(`Search completed! Found ${this.currentPapers.length} papers.`);
+            this.expectedPaperCount = null; // Reset for next search
         } else if (data.type === 'error') {
+            this.hideLoading();
             this.showError(data.message || 'Search failed');
+            this.expectedPaperCount = null; // Reset for next search
         }
     }
 
@@ -220,6 +378,11 @@ class PaperWhispererApp {
     addPaper(paper) {
         this.currentPapers.push(paper);
         this.displayPapers();
+        
+        // Update progress based on current papers count for parallel downloads
+        const totalExpected = this.expectedPaperCount || this.currentPapers.length;
+        const message = `Downloaded ${this.currentPapers.length} of ${totalExpected} papers...`;
+        this.updateProgress(this.currentPapers.length, totalExpected, message);
     }
 
     displayPapers() {
@@ -244,6 +407,9 @@ class PaperWhispererApp {
             const paperCard = this.createPaperCard(paper, index);
             grid.appendChild(paperCard);
         });
+        
+        // Update comparison toolbar state
+        this.updateComparisonToolbar();
     }
 
     createPaperCard(paper, index) {
@@ -259,16 +425,31 @@ class PaperWhispererApp {
             '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>' :
             '<div class="small-spinner"></div>';
 
+        const isSelected = this.selectedPapers.has(index);
+        const selectionClass = isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : '';
+
         card.innerHTML = `
-            <div class="p-6 bg-white">
+            <div class="p-6 bg-white ${selectionClass}">
                 <div class="flex items-start justify-between mb-4">
-                    <div class="flex-1 pr-4">
-                        <h3 class="text-lg font-bold text-gray-800 leading-tight mb-2 line-clamp-2 font-source">
-                            ${paper.title}
-                        </h3>
-                        <p class="text-sm text-gray-600 mb-3">
-                            <span class="font-medium text-blue-600">Authors:</span> ${authorsText}
-                        </p>
+                    <div class="flex items-start space-x-3 flex-1">
+                        <!-- Selection Checkbox -->
+                        <div class="flex-shrink-0 mt-1">
+                            <input type="checkbox" 
+                                   id="paper-checkbox-${index}"
+                                   class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                                   ${isSelected ? 'checked' : ''}
+                                   onchange="paperWhispererApp.togglePaperSelection(${index})"
+                                   ${!paper.downloaded ? 'disabled' : ''}>
+                        </div>
+                        
+                        <div class="flex-1 pr-4">
+                            <h3 class="text-lg font-bold text-gray-800 leading-tight mb-2 line-clamp-2 font-source">
+                                ${paper.title}
+                            </h3>
+                            <p class="text-sm text-gray-600 mb-3">
+                                <span class="font-medium text-blue-600">Authors:</span> ${authorsText}
+                            </p>
+                        </div>
                     </div>
                     
                     <div class="${statusClass} px-3 py-2 rounded-lg text-white text-xs font-bold flex items-center space-x-2">
@@ -294,12 +475,12 @@ class PaperWhispererApp {
                 
                 <div class="flex space-x-3">
                     <button onclick="paperWhispererApp.openPaperPreview(${index})"
-                            class="flex-1 btn-primary py-2.5 px-4 rounded-lg font-medium text-sm ${!paper.downloaded ? 'opacity-50 cursor-not-allowed' : ''}"
+                            class="flex-1 btn-primary py-2 px-3 rounded-lg font-medium text-sm ${!paper.downloaded ? 'opacity-50 cursor-not-allowed' : ''}"
                             ${!paper.downloaded ? 'disabled' : ''}
                             data-paper-index="${index}"
                             id="preview-btn-${index}">
-                        <span class="flex items-center justify-center space-x-2">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <span class="flex items-center justify-center space-x-1.5">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
                             </svg>
@@ -308,9 +489,9 @@ class PaperWhispererApp {
                     </button>
 
                     <button onclick="paperWhispererApp.openArxivLink('${paper.arxiv_url || '#'}')"
-                            class="px-4 py-2.5 btn-secondary rounded-lg font-medium text-sm transition-all duration-200">
-                        <span class="flex items-center justify-center space-x-2">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            class="px-3 py-2 btn-secondary rounded-lg font-medium text-sm transition-all duration-200">
+                        <span class="flex items-center justify-center space-x-1.5">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
                             </svg>
                             <span>ArXiv</span>
@@ -853,15 +1034,20 @@ class PaperWhispererApp {
             });
 
             const data = await response.json();
+            console.log('Chat response:', JSON.stringify(data, null, 2));
             
             // Hide loading
             this.hideChatLoading();
 
             if (data.success) {
+                // Handle different response formats
+                const aiMessage = data.message || data.response || 'No response received';
+                const sources = data.sources || null;
+                
                 // Add AI response
-                this.addChatMessage('ai', data.message, data.sources);
+                this.addChatMessage('ai', aiMessage, sources);
             } else {
-                this.addChatMessage('system', data.message || 'Sorry, I encountered an error processing your question.');
+                this.addChatMessage('system', data.message || data.response || 'Sorry, I encountered an error processing your question.');
             }
 
         } catch (error) {
@@ -872,7 +1058,14 @@ class PaperWhispererApp {
     }
 
     addChatMessage(type, message, sources = null) {
+        console.log('Adding chat message:', { type, message, sources });
+        
         const chatMessages = document.getElementById('chatMessages');
+        if (!chatMessages) {
+            console.error('chatMessages element not found');
+            return;
+        }
+        
         const messageDiv = document.createElement('div');
         
         if (type === 'user') {
@@ -913,12 +1106,15 @@ class PaperWhispererApp {
             `;
         }
 
+        console.log('Appending message div to chatMessages');
         chatMessages.appendChild(messageDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
+        console.log('Message added successfully');
     }
 
     formatChatMessage(message) {
         // Basic formatting for chat messages
+        if (!message) return '';
         return this.escapeHtml(message)
             .replace(/\n/g, '<br>')
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -928,11 +1124,13 @@ class PaperWhispererApp {
     formatSources(sources) {
         if (!sources || sources.length === 0) return '';
         
-        const sourcesList = sources.map(source => 
-            `<span class="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full mr-1 mb-1">
-                ${this.escapeHtml(source.title.substring(0, 30))}... (p.${source.page})
-            </span>`
-        ).join('');
+        const sourcesList = sources.map(source => {
+            const title = source.title || 'Untitled';
+            const page = source.page || 'Unknown';
+            return `<span class="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full mr-1 mb-1">
+                ${this.escapeHtml(title.substring(0, 30))}... (p.${page})
+            </span>`;
+        }).join('');
         
         return `<div class="mt-3 pt-3 border-t border-gray-200">
             <div class="text-xs text-gray-600 mb-2">Sources:</div>
@@ -941,7 +1139,10 @@ class PaperWhispererApp {
     }
 
     escapeHtml(unsafe) {
-        return unsafe
+        if (unsafe === null || unsafe === undefined) {
+            return '';
+        }
+        return String(unsafe)
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;")
@@ -971,6 +1172,367 @@ class PaperWhispererApp {
         // Reload status
         this.loadChatStatus();
     }
+
+    // ===============================
+    // COMPARATIVE ANALYSIS METHODS
+    // ===============================
+    
+    togglePaperSelection(index) {
+        const paper = this.currentPapers[index];
+        if (!paper || !paper.downloaded) return;
+
+        const checkbox = document.getElementById(`paper-checkbox-${index}`);
+        
+        if (checkbox.checked) {
+            this.selectedPapers.add(index);
+        } else {
+            this.selectedPapers.delete(index);
+        }
+        
+        this.updateComparisonToolbar();
+        this.updatePaperCardSelection(index);
+    }
+
+    updatePaperCardSelection(index) {
+        const isSelected = this.selectedPapers.has(index);
+        const card = document.querySelector(`[data-paper-index="${index}"]`)?.closest('.paper-card');
+        
+        if (card) {
+            const cardContent = card.querySelector('div');
+            if (isSelected) {
+                cardContent.classList.add('ring-2', 'ring-blue-500', 'bg-blue-50');
+            } else {
+                cardContent.classList.remove('ring-2', 'ring-blue-500', 'bg-blue-50');
+            }
+        }
+    }
+
+    updateComparisonToolbar() {
+        const toolbar = document.getElementById('comparisonToolbar');
+        const selectedCount = document.getElementById('selectedCount');
+        const compareBtn = document.getElementById('compareBtn');
+        
+        const count = this.selectedPapers.size;
+        selectedCount.textContent = count;
+        
+        // Show/hide toolbar
+        if (count > 0) {
+            toolbar.classList.remove('hidden');
+        } else {
+            toolbar.classList.add('hidden');
+        }
+        
+        // Enable/disable compare button
+        if (count >= 2) {
+            compareBtn.disabled = false;
+            compareBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        } else {
+            compareBtn.disabled = true;
+            compareBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        }
+    }
+
+    selectAllPapers() {
+        // Select all downloaded papers
+        this.currentPapers.forEach((paper, index) => {
+            if (paper.downloaded) {
+                this.selectedPapers.add(index);
+                const checkbox = document.getElementById(`paper-checkbox-${index}`);
+                if (checkbox) {
+                    checkbox.checked = true;
+                }
+                this.updatePaperCardSelection(index);
+            }
+        });
+        
+        this.updateComparisonToolbar();
+    }
+
+    clearSelection() {
+        // Clear all selections
+        this.selectedPapers.forEach(index => {
+            const checkbox = document.getElementById(`paper-checkbox-${index}`);
+            if (checkbox) {
+                checkbox.checked = false;
+            }
+            this.updatePaperCardSelection(index);
+        });
+        
+        this.selectedPapers.clear();
+        this.updateComparisonToolbar();
+    }
+
+    async runComparison() {
+        if (this.selectedPapers.size < 2) {
+            this.showNotification('Please select at least 2 papers for comparison', 'error');
+            return;
+        }
+
+        // Open comparison modal and show loading
+        this.openComparisonModal();
+        
+        try {
+            const selectedIndices = Array.from(this.selectedPapers);
+            
+            const response = await fetch(`${this.apiBase}/analysis/compare`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    paper_indices: selectedIndices
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                this.displayComparisonResults(data.analysis_results);
+                this.showNotification('Comparative analysis completed successfully!', 'success');
+                if (data.warnings && data.warnings.length > 0) {
+                    this.showNotification(`Analysis completed with warnings: ${data.warnings.join(', ')}`, 'warning');
+                }
+            } else {
+                const errorDetail = data.detail || 'Analysis failed';
+                if (typeof errorDetail === 'object' && errorDetail.partial_results) {
+                    // Handle partial failure - show partial results
+                    this.displayComparisonResults(errorDetail.partial_results);
+                    this.showNotification(`Partial analysis completed. Some papers failed: ${errorDetail.failed_papers?.join(', ') || 'Unknown papers'}`, 'warning');
+                } else {
+                    throw new Error(typeof errorDetail === 'string' ? errorDetail : errorDetail.error || 'Unknown error');
+                }
+            }
+            
+        } catch (error) {
+            console.error('Comparison error:', error);
+            this.showComparisonError(error.message);
+            this.showNotification(`Analysis failed: ${error.message}`, 'error');
+        }
+    }
+
+    async testComparison() {
+        // Open comparison modal and show loading
+        this.openComparisonModal();
+        
+        try {
+            const response = await fetch(`${this.apiBase}/analysis/test-data`);
+            const data = await response.json();
+
+            if (data.success) {
+                this.displayComparisonResults(data.analysis_results);
+                this.showNotification('Test comparison data loaded successfully!', 'success');
+            } else {
+                throw new Error(data.error || 'Failed to load test data');
+            }
+        } catch (error) {
+            console.error('Test comparison error:', error);
+            this.showComparisonError(error.message);
+            this.showNotification(`Failed to load test data: ${error.message}`, 'error');
+        }
+    }
+
+    openComparisonModal() {
+        const modal = document.getElementById('comparisonModal');
+        const loading = document.getElementById('comparisonLoading');
+        const results = document.getElementById('comparisonResults');
+        const error = document.getElementById('comparisonError');
+        
+        // Reset modal state
+        loading.classList.remove('hidden');
+        results.classList.add('hidden');
+        error.classList.add('hidden');
+        
+        modal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    }
+
+    closeComparisonModal() {
+        const modal = document.getElementById('comparisonModal');
+        modal.classList.add('hidden');
+        document.body.style.overflow = '';
+    }
+
+    displayComparisonResults(results) {
+        const loading = document.getElementById('comparisonLoading');
+        const resultsDiv = document.getElementById('comparisonResults');
+        const summaryDiv = document.getElementById('analysisSummary');
+        const tableDiv = document.getElementById('comparisonTable');
+        const vizDiv = document.getElementById('comparisonVisualizations');
+        const downloadDiv = document.getElementById('downloadLinks');
+        
+        // Hide loading, show results
+        loading.classList.add('hidden');
+        resultsDiv.classList.remove('hidden');
+        
+        // Display summary
+        let summaryContent = '';
+        if (results.summary && typeof results.summary === 'string') {
+            summaryContent = this.formatMarkdown(results.summary);
+        } else if (results.paper_summaries && results.paper_summaries.length > 0) {
+            // Use paper summaries if available
+            summaryContent = results.paper_summaries.map(paper => `
+                <div class="mb-4 p-4 border-l-4 border-blue-500 bg-blue-50">
+                    <h5 class="font-semibold text-blue-900 mb-2">${paper.title || 'Unknown Title'}</h5>
+                    <p class="text-blue-800 text-sm">${paper.summary || 'No summary available'}</p>
+                    <div class="mt-2 text-xs text-blue-700">
+                        <strong>Strengths:</strong> ${paper.key_strengths || 'Not specified'}
+                    </div>
+                    <div class="mt-1 text-xs text-blue-700">
+                        <strong>Limitations:</strong> ${paper.key_limitations || 'Not specified'}
+                    </div>
+                </div>
+            `).join('');
+        } else if (results.detailed_comparison && results.detailed_comparison.summary && typeof results.detailed_comparison.summary === 'string') {
+            summaryContent = this.formatMarkdown(results.detailed_comparison.summary);
+        } else {
+            summaryContent = '<p class="text-gray-600">No summary available</p>';
+        }
+        summaryDiv.innerHTML = summaryContent;
+        
+        // Display comparison table - check multiple possible locations
+        let tableContent = '';
+        if (results.html_table) {
+            tableContent = results.html_table;
+        } else if (results.comparison && results.comparison.html_table) {
+            tableContent = results.comparison.html_table;
+        } else if (results.dataframe && results.dataframe.length > 0) {
+            // Create table from dataframe data
+            const headers = Object.keys(results.dataframe[0]);
+            tableContent = `
+                <table class="w-full border-collapse border border-gray-300">
+                    <thead>
+                        <tr class="bg-gray-100">
+                            ${headers.map(header => `<th class="border border-gray-300 px-4 py-2 text-left font-semibold">${header}</th>`).join('')}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${results.dataframe.map(row => `
+                            <tr>
+                                ${headers.map(header => `<td class="border border-gray-300 px-4 py-2">${row[header] || 'N/A'}</td>`).join('')}
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        } else {
+            tableContent = '<p class="text-gray-600 p-4">No comparison table available</p>';
+        }
+        
+        if (tableContent.includes('<table')) {
+            tableDiv.innerHTML = tableContent;
+            // Add some styling to the table
+            const table = tableDiv.querySelector('table');
+            if (table) {
+                table.className = 'w-full border-collapse border border-gray-300';
+                const headers = table.querySelectorAll('th');
+                headers.forEach(th => {
+                    th.className = 'border border-gray-300 bg-gray-100 px-4 py-2 text-left font-semibold';
+                });
+                const cells = table.querySelectorAll('td');
+                cells.forEach(td => {
+                    td.className = 'border border-gray-300 px-4 py-2';
+                });
+            }
+        } else {
+            tableDiv.innerHTML = '<p class="text-gray-600 p-4">No comparison table available</p>';
+        }
+        
+        // Display visualizations
+        this.displayVisualizations(results.visualizations || {}, vizDiv);
+        
+        // Display download links
+        this.displayDownloadLinks(results.export_paths || {}, downloadDiv);
+    }
+
+    displayVisualizations(visualizations, container) {
+        container.innerHTML = '';
+        
+        const vizTypes = Object.keys(visualizations).filter(key => key !== 'error' && visualizations[key]);
+        
+        if (vizTypes.length === 0) {
+            container.innerHTML = '<p class="text-gray-600 col-span-2">No visualizations available</p>';
+            return;
+        }
+        
+        vizTypes.forEach(vizType => {
+            const vizPath = visualizations[vizType];
+            const vizDiv = document.createElement('div');
+            vizDiv.className = 'text-center bg-white border rounded-lg p-4';
+            vizDiv.innerHTML = `
+                <h5 class="font-semibold text-gray-800 mb-3">${this.formatVizTitle(vizType)}</h5>
+                <img src="/static/${vizPath.split('/').pop()}" 
+                     alt="${vizType}" 
+                     class="w-full h-auto max-h-64 object-contain mx-auto rounded border"
+                     onerror="this.parentElement.innerHTML='<p class=\\"text-gray-500\\">Visualization not available</p>'">
+            `;
+            container.appendChild(vizDiv);
+        });
+    }
+
+    displayDownloadLinks(exportPaths, container) {
+        container.innerHTML = '';
+        
+        const downloadTypes = [
+            { key: 'json', label: 'JSON Results', icon: 'document-text' },
+            { key: 'markdown', label: 'Markdown Report', icon: 'document' },
+            { key: 'csv', label: 'CSV Table', icon: 'table' }
+        ];
+        
+        if (Object.keys(exportPaths).length === 0) {
+            container.innerHTML = '<p class="text-gray-600">No download files available</p>';
+            return;
+        }
+        
+        // Extract output directory from first export path
+        const firstPath = Object.values(exportPaths)[0];
+        const outputDir = firstPath ? firstPath.split('/')[0] : 'analysis_output';
+        
+        downloadTypes.forEach(type => {
+            const link = document.createElement('a');
+            link.href = `${this.apiBase}/analysis/download/${outputDir}/${type.key}`;
+            link.target = '_blank';
+            link.className = 'inline-flex items-center space-x-2 bg-blue-100 text-blue-800 px-4 py-2 rounded-lg hover:bg-blue-200 transition-colors text-sm font-medium';
+            link.innerHTML = `
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                <span>${type.label}</span>
+            `;
+            container.appendChild(link);
+        });
+    }
+
+    showComparisonError(message) {
+        const loading = document.getElementById('comparisonLoading');
+        const results = document.getElementById('comparisonResults');
+        const error = document.getElementById('comparisonError');
+        const errorMessage = document.getElementById('errorMessage');
+        
+        loading.classList.add('hidden');
+        results.classList.add('hidden');
+        error.classList.remove('hidden');
+        errorMessage.textContent = message;
+    }
+
+    formatMarkdown(text) {
+        // Handle null, undefined, or non-string values
+        if (!text || typeof text !== 'string') {
+            return '';
+        }
+        
+        // Simple markdown formatting
+        return text
+            .replace(/^## (.*$)/gm, '<h3 class="text-lg font-bold text-gray-800 mt-4 mb-2">$1</h3>')
+            .replace(/^\*\*(.*?):\*\*/gm, '<strong class="font-semibold text-gray-800">$1:</strong>')
+            .replace(/^- (.*)$/gm, '<li class="ml-4">$1</li>')
+            .replace(/\n/g, '<br>');
+    }
+
+    formatVizTitle(vizType) {
+        return vizType
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, l => l.toUpperCase());
+    }
 }
 
 // Global functions
@@ -980,6 +1542,10 @@ function closePaperModal() {
 
 function closeChatModal() {
     paperWhispererApp.closeChatModal();
+}
+
+function closeComparisonModal() {
+    paperWhispererApp.closeComparisonModal();
 }
 
 // Initialize app when DOM is loaded
