@@ -4,8 +4,9 @@ from typing import Optional, Dict, Any, List
 from pathlib import Path
 import json
 from groq import Groq
+from dotenv import load_dotenv
 
-
+load_dotenv()
 class PaperSummarizationService:
     """Service for summarizing paper sections using Groq LLM with Gemma"""
 

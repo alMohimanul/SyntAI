@@ -124,37 +124,80 @@ class ArxivScraper:
             print("\n3. Restart your terminal/IDE after installation")
             print("=" * 50)
             return False
+        
 
-    def search_papers(
-        self, domain, max_results=10, sort_by="submittedDate", sort_order="descending"
+    def search_papers_by_keywords(
+        self, keywords, max_results=10, sort_by="relevance", sort_order="descending",
+        include_categories=None, time_range_days=180, start_date=None, end_date=None
     ):
         """
-        Search for papers in a specific domain on arXiv.
+        Search for papers using natural language keywords across multiple fields.
 
         Args:
-            domain (str): arXiv category (e.g., 'cs.AI', 'cs.CV', 'cs.LG', 'math.CO')
+            keywords (str): Natural language search query (e.g., "biomedical image segmentation")
             max_results (int): Maximum number of papers to retrieve
             sort_by (str): Sort criteria ('relevance', 'lastUpdatedDate', 'submittedDate')
             sort_order (str): Sort order ('ascending', 'descending')
+            include_categories (list): Optional list of arXiv categories to include
+            time_range_days (int): Number of days to look back (default: 6 months)
+            start_date (str): Start date in YYYY-MM-DD format (optional)
+            end_date (str): End date in YYYY-MM-DD format (optional)
 
         Returns:
             list: List of paper dictionaries
         """
-        print(f"Searching for papers in domain: {domain}")
-        print(f"Fetching {max_results} papers from the last month...")
+        print(f"🔍 Searching for papers with keywords: '{keywords}'")
 
-        # Calculate date range for the last month
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)
-        
+        # Handle custom date range or default time range
+        if start_date and end_date:
+            try:
+                start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+                end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+                print(f"📅 Custom date range: {start_date} to {end_date}")
+            except ValueError as e:
+                print(f"❌ Invalid date format: {e}")
+                return []
+        else:
+            # Calculate date range (ensure we're looking back in time)
+            end_dt = datetime.now()
+            # Use default 180 days if time_range_days is None
+            days_to_look_back = time_range_days if time_range_days is not None else 180
+            start_dt = end_dt - timedelta(days=days_to_look_back)
+            print(f"📅 Looking back {days_to_look_back} days, fetching up to {max_results} papers...")
+
         # Format dates for arXiv API (YYYYMMDD format)
-        start_date_str = start_date.strftime("%Y%m%d")
-        end_date_str = end_date.strftime("%Y%m%d")
-        
-        # Construct the query with date range
-        query = f"cat:{domain} AND submittedDate:[{start_date_str}0000 TO {end_date_str}2359]"
+        start_date_str = start_dt.strftime("%Y%m%d")
+        end_date_str = end_dt.strftime("%Y%m%d")
+
+        print(f"📅 Date range: {start_date_str} to {end_date_str}")
+
+        # Prepare search terms (simplified)
+        search_terms = self._prepare_search_terms(keywords)
+
+        # Auto-detect relevant categories if not provided
+        if include_categories is None:
+            include_categories = self._suggest_categories(keywords)
+            print(f"🎯 Auto-detected relevant categories: {', '.join(include_categories)}")
+
+        # Build simplified search query to avoid ArXiv API limits
+        # Start with basic keyword search in title and abstract
+        basic_query = f"all:{keywords}"
+
+        # Add category filter if specified (simplified)
+        if include_categories:
+            category_query = " OR ".join([f"cat:{cat}" for cat in include_categories[:3]])  # Limit to 3 categories
+            final_query = f"({basic_query}) AND ({category_query})"
+        else:
+            final_query = basic_query
+
+        # Add date range filter
+        date_filter = f"submittedDate:[{start_date_str}0000 TO {end_date_str}2359]"
+        final_query = f"({final_query}) AND {date_filter}"
+
+        print(f"📝 Query: {final_query}")
+
         params = {
-            "search_query": query,
+            "search_query": final_query,
             "start": 0,
             "max_results": max_results,
             "sortBy": sort_by,
@@ -177,15 +220,178 @@ class ArxivScraper:
                 paper_data = self.extract_paper_data(entry)
                 papers.append(paper_data)
 
-            print(f"Successfully found {len(papers)} papers")
+            print(f"✅ Successfully found {len(papers)} papers")
             self.papers_data = papers
             return papers
 
         except requests.RequestException as e:
-            print(f"Error fetching papers: {e}")
+            print(f"❌ Error fetching papers: {e}")
             return []
         except Exception as e:
-            print(f"Error parsing feed: {e}")
+            print(f"❌ Error parsing feed: {e}")
+            return []
+
+    def _prepare_search_terms(self, keywords):
+        """
+        Prepare search terms for arXiv API query.
+        
+        Args:
+            keywords (str): Raw search keywords
+            
+        Returns:
+            str: Formatted search terms
+        """
+        # Clean and prepare search terms
+        terms = keywords.strip().lower()
+        
+        # Split into individual words
+        words = re.findall(r'\b\w+\b', terms)
+        
+        # Create search combinations
+        # 1. Exact phrase (if multiple words)
+        if len(words) > 1:
+            exact_phrase = f'"{keywords}"'
+            
+            # 2. All words must appear (AND)
+            all_words = " AND ".join(words)
+            
+            # 3. Any words can appear (OR) 
+            any_words = " OR ".join(words)
+            
+            # Combine for comprehensive search
+            search_terms = f'({exact_phrase}) OR ({all_words}) OR ({any_words})'
+        else:
+            # Single word search
+            search_terms = words[0]
+            
+        return search_terms
+
+    def _suggest_categories(self, keywords):
+        """
+        Suggest relevant arXiv categories based on keywords.
+        
+        Args:
+            keywords (str): Search keywords
+            
+        Returns:
+            list: List of suggested arXiv categories
+        """
+        keywords_lower = keywords.lower()
+        suggested_categories = []
+        
+        # Define category mappings
+        category_mappings = {
+            # Computer Science
+            'cs.AI': ['artificial intelligence', 'ai', 'machine learning', 'ml', 'deep learning', 
+                     'neural network', 'reinforcement learning', 'nlp', 'natural language'],
+            'cs.CV': ['computer vision', 'image', 'visual', 'object detection', 'segmentation', 
+                     'face recognition', 'optical', 'video', 'image processing'],
+            'cs.LG': ['learning', 'algorithm', 'classification', 'regression', 'clustering', 
+                     'supervised', 'unsupervised', 'training', 'model'],
+            'cs.CL': ['language', 'text', 'nlp', 'translation', 'sentiment', 'speech', 
+                     'linguistic', 'chatbot', 'dialogue'],
+            'cs.RO': ['robot', 'robotics', 'autonomous', 'control', 'navigation', 'manipulation'],
+            'cs.CR': ['security', 'cryptography', 'privacy', 'encryption', 'authentication'],
+            'cs.DB': ['database', 'data', 'query', 'storage', 'retrieval'],
+            'cs.DC': ['distributed', 'parallel', 'cloud', 'grid', 'concurrent'],
+            'cs.NE': ['network', 'internet', 'protocol', 'communication', 'wireless'],
+            
+            # Statistics
+            'stat.ML': ['statistical', 'statistics', 'bayesian', 'inference', 'probability'],
+            
+            # Mathematics
+            'math.OC': ['optimization', 'control', 'optimal', 'minimize', 'maximize'],
+            'math.ST': ['statistics', 'statistical', 'stochastic', 'random'],
+            'math.NA': ['numerical', 'computational', 'simulation', 'algorithm'],
+            
+            # Physics
+            'physics.comp-ph': ['computational physics', 'simulation', 'modeling'],
+            'physics.data-an': ['data analysis', 'experimental', 'measurement'],
+            
+            # Quantitative Biology
+            'q-bio.QM': ['biomedical', 'biological', 'medical', 'health', 'clinical'],
+            'q-bio.NC': ['neuroscience', 'brain', 'neural', 'cognitive'],
+            'q-bio.GN': ['genomics', 'genetics', 'dna', 'gene'],
+            
+            # Economics
+            'econ.EM': ['economics', 'econometrics', 'market', 'financial'],
+        }
+        
+        # Find matching categories
+        for category, keywords_list in category_mappings.items():
+            if any(keyword in keywords_lower for keyword in keywords_list):
+                suggested_categories.append(category)
+        
+        # Default fallback categories if no matches
+        if not suggested_categories:
+            suggested_categories = ['cs.AI', 'cs.LG', 'cs.CV']  # Most common research areas
+            
+        return suggested_categories
+
+    # Keep the original domain-based search for backward compatibility
+    def search_papers(
+        self, domain, max_results=10, sort_by="submittedDate", sort_order="descending"
+    ):
+        """
+        Search for papers in a specific domain on arXiv (legacy method).
+
+        Args:
+            domain (str): arXiv category (e.g., 'cs.AI', 'cs.CV', 'cs.LG', 'math.CO')
+            max_results (int): Maximum number of papers to retrieve
+            sort_by (str): Sort criteria ('relevance', 'lastUpdatedDate', 'submittedDate')
+            sort_order (str): Sort order ('ascending', 'descending')
+
+        Returns:
+            list: List of paper dictionaries
+        """
+        print(f"🔍 Searching for papers in domain: {domain}")
+        print(f"📅 Fetching {max_results} papers from the last 6 months...")
+
+        # Calculate date range for the last 6 months (broader range for better diversity)
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=180)  # 6 months instead of 30 days
+        
+        # Format dates for arXiv API (YYYYMMDD format)
+        start_date_str = start_date.strftime("%Y%m%d")
+        end_date_str = end_date.strftime("%Y%m%d")
+        
+        # Construct the query with date range
+        query = f"cat:{domain} AND submittedDate:[{start_date_str}0000 TO {end_date_str}2359]"
+        params = {
+            "search_query": query,
+            "start": 0,
+            "max_results": max_results,
+            "sortBy": sort_by,
+            "sortOrder": sort_order,
+        }
+
+        try:
+            print(f"📝 Query: {query}")
+            
+            # Make the API request
+            response = requests.get(self.base_url, params=params, timeout=30)
+            response.raise_for_status()
+
+            # Parse the feed
+            feed = feedparser.parse(response.content)
+
+            if feed.bozo:
+                print("Warning: Feed may have parsing issues")
+
+            papers = []
+            for entry in feed.entries:
+                paper_data = self.extract_paper_data(entry)
+                papers.append(paper_data)
+
+            print(f"✅ Successfully found {len(papers)} papers for domain {domain}")
+            self.papers_data = papers
+            return papers
+
+        except requests.RequestException as e:
+            print(f"❌ Error fetching papers: {e}")
+            return []
+        except Exception as e:
+            print(f"❌ Error parsing feed: {e}")
             return []
 
     def extract_paper_data(self, entry):
@@ -271,12 +477,14 @@ class ArxivScraper:
 
         return methodology_info
 
-    def download_pdfs(self, papers=None):
+    def download_pdfs_parallel(self, papers=None, max_workers=3, progress_callback=None):
         """
-        Download PDFs for the papers.
+        Download PDFs for the papers in parallel.
 
         Args:
             papers (list): List of paper dictionaries. If None, uses self.papers_data
+            max_workers (int): Maximum number of parallel downloads
+            progress_callback (function): Optional callback function to report progress
         """
         if papers is None:
             papers = self.papers_data
@@ -285,11 +493,15 @@ class ArxivScraper:
             print("No papers to download")
             return
 
-        print(f"Starting download of {len(papers)} PDFs...")
+        print(f"Starting parallel download of {len(papers)} PDFs with {max_workers} workers...")
+        
+        completed_count = 0
 
-        for i, paper in enumerate(papers, 1):
+        def download_single_paper(paper):
+            """Download a single paper"""
             try:
-                print(f"Downloading {i}/{len(papers)}: {paper['title'][:50]}...")
+                paper_title = paper['title'][:50]
+                print(f"📥 Downloading: {paper_title}...")
 
                 # Create safe filename
                 safe_title = self.create_safe_filename(paper["title"])
@@ -298,7 +510,6 @@ class ArxivScraper:
 
                 # Remove existing file if it exists to always download fresh copy
                 if filepath.exists():
-                    print(f"  Removing existing file: {filename}")
                     filepath.unlink()
 
                 # Download PDF
@@ -312,17 +523,58 @@ class ArxivScraper:
 
                 paper["downloaded"] = True
                 paper["pdf_filename"] = filename
-                print(f"  Successfully downloaded: {filename}")
-
-                # Be respectful to the server
-                time.sleep(1)
+                print(f"✅ Successfully downloaded: {filename}")
+                return paper
 
             except requests.RequestException as e:
-                print(f"  Error downloading {paper['title'][:30]}: {e}")
+                print(f"❌ Error downloading {paper['title'][:30]}: {e}")
                 paper["downloaded"] = False
+                return paper
             except Exception as e:
-                print(f"  Unexpected error with {paper['title'][:30]}: {e}")
+                print(f"❌ Unexpected error with {paper['title'][:30]}: {e}")
                 paper["downloaded"] = False
+                return paper
+
+        # Use ThreadPoolExecutor for parallel downloads
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all download tasks
+            future_to_paper = {executor.submit(download_single_paper, paper): paper for paper in papers}
+
+            # Process completed downloads
+            for future in as_completed(future_to_paper):
+                paper = future_to_paper[future]
+                try:
+                    result = future.result()
+                    # Update the original paper object
+                    paper.update(result)
+                    completed_count += 1
+                    
+                    # Call progress callback if provided
+                    if progress_callback:
+                        progress_callback(completed_count, len(papers), paper)
+                        
+                except Exception as e:
+                    print(f"❌ Download task failed for {paper['title'][:30]}: {e}")
+                    paper["downloaded"] = False
+                    completed_count += 1
+                    
+                    # Call progress callback even for failed downloads
+                    if progress_callback:
+                        progress_callback(completed_count, len(papers), paper)
+
+        print(f"🎉 Parallel download completed for {len(papers)} papers")
+
+    def download_pdfs(self, papers=None):
+        """
+        Download PDFs for the papers (legacy sequential method).
+
+        Args:
+            papers (list): List of paper dictionaries. If None, uses self.papers_data
+        """
+        # Use parallel download by default
+        self.download_pdfs_parallel(papers, max_workers=3)
 
     def create_safe_filename(self, title):
         """
@@ -557,6 +809,82 @@ class ArxivScraper:
             return []
     
     
+    def download_from_url(self, arxiv_url):
+        """
+        Download a paper from a specific ArXiv URL.
+        
+        Args:
+            arxiv_url (str): ArXiv URL (e.g., https://arxiv.org/abs/2408.12345)
+            
+        Returns:
+            dict: Paper data dictionary or None if failed
+        """
+        import re
+        
+        # Extract arXiv ID from URL
+        arxiv_id_match = re.search(r'arxiv\.org/(?:abs|pdf)/(\d+\.\d+)', arxiv_url)
+        if not arxiv_id_match:
+            print(f"❌ Invalid ArXiv URL format: {arxiv_url}")
+            return None
+            
+        arxiv_id = arxiv_id_match.group(1)
+        
+        try:
+            print(f"🔍 Fetching paper info for {arxiv_id}...")
+            
+            # Use arXiv API to get paper metadata
+            api_url = f"http://export.arxiv.org/api/query?id_list={arxiv_id}"
+            response = requests.get(api_url, timeout=30)
+            response.raise_for_status()
+            
+            # Parse the feed
+            feed = feedparser.parse(response.content)
+            
+            if not feed.entries:
+                print(f"❌ No paper found for ID: {arxiv_id}")
+                return None
+                
+            # Extract paper data
+            entry = feed.entries[0]
+            paper_data = self.extract_paper_data(entry)
+            
+            print(f"✅ Found paper: {paper_data['title'][:50]}...")
+            
+            # Download the PDF
+            print(f"📥 Downloading PDF...")
+            self.download_pdfs([paper_data])
+            
+            return paper_data
+            
+        except Exception as e:
+            print(f"❌ Error downloading from URL {arxiv_url}: {e}")
+            return None
+
+    def search_and_download(self, domain, max_results=10):
+        """
+        Search for papers and download them in one operation.
+        
+        Args:
+            domain (str): ArXiv category
+            max_results (int): Maximum number of papers
+            
+        Returns:
+            list: List of downloaded papers
+        """
+        try:
+            # Search for papers
+            papers = self.search_papers(domain, max_results)
+            
+            if papers:
+                # Download PDFs
+                self.download_pdfs(papers)
+                
+            return papers
+            
+        except Exception as e:
+            print(f"❌ Error in search and download: {e}")
+            return []
+
     def deep_research_analysis(self, paper_data):
         """
         Perform deep research analysis with PDF preparation for on-demand code extraction.

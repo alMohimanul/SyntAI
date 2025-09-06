@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Paper Comparative Analysis</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .analysis-results {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .comparison-table {
+            font-size: 0.875rem;
+        }
+        .comparison-table th, .comparison-table td {
+            padding: 8px;
+            border: 1px solid #e5e7eb;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold text-gray-900 mb-8">Multi-Paper Comparative Analysis</h1>
+        
+        <!-- Status Section -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Service Status</h2>
+            <div id="status" class="text-gray-600">Checking service status...</div>
+        </div>
+
+        <!-- Papers Selection Section -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Select Papers for Comparison</h2>
+            <div id="papers-list" class="space-y-2 mb-4">
+                <div class="text-gray-600">Loading papers...</div>
+            </div>
+            <button id="compare-selected" 
+                    class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                    disabled>
+                Compare Selected Papers
+            </button>
+            <div id="comparison-status" class="mt-4 text-sm text-gray-600"></div>
+        </div>
+
+        <!-- File Upload Section -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Upload PDF Files for Comparison</h2>
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    PDF File Paths (one per line):
+                </label>
+                <textarea id="pdf-paths" 
+                          class="w-full h-32 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder="Enter full paths to PDF files, one per line:&#10;C:\path\to\paper1.pdf&#10;C:\path\to\paper2.pdf&#10;C:\path\to\paper3.pdf"></textarea>
+            </div>
+            <button id="compare-files" 
+                    class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700">
+                Compare PDF Files
+            </button>
+            <div id="file-comparison-status" class="mt-4 text-sm text-gray-600"></div>
+        </div>
+
+        <!-- Analysis Results Section -->
+        <div id="results-section" class="bg-white rounded-lg shadow-md p-6 hidden">
+            <h2 class="text-xl font-semibold mb-4">Analysis Results</h2>
+            
+            <!-- Summary -->
+            <div class="mb-6">
+                <h3 class="text-lg font-medium mb-2">Summary</h3>
+                <div id="analysis-summary" class="prose max-w-none bg-gray-50 p-4 rounded-lg"></div>
+            </div>
+
+            <!-- Comparison Table -->
+            <div class="mb-6">
+                <h3 class="text-lg font-medium mb-2">Comparison Table</h3>
+                <div id="comparison-table" class="analysis-results overflow-x-auto"></div>
+            </div>
+
+            <!-- Visualizations -->
+            <div class="mb-6">
+                <h3 class="text-lg font-medium mb-2">Visualizations</h3>
+                <div id="visualizations" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+            </div>
+
+            <!-- Download Links -->
+            <div class="mb-6">
+                <h3 class="text-lg font-medium mb-2">Download Results</h3>
+                <div id="download-links" class="space-x-4"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentPapers = [];
+        let selectedPapers = [];
+        let currentAnalysisDir = null;
+
+        // Check service status on load
+        document.addEventListener('DOMContentLoaded', function() {
+            checkServiceStatus();
+            loadPapers();
+        });
+
+        async function checkServiceStatus() {
+            try {
+                const response = await fetch('/api/analysis/status');
+                const data = await response.json();
+                
+                const statusDiv = document.getElementById('status');
+                if (data.available) {
+                    statusDiv.innerHTML = `
+                        <div class="text-green-600">
+                            ✅ Service Available - ${data.message}
+                            <br>Current papers: ${data.current_papers_count}
+                            <br>LLM Extractor: ${data.extractor_available ? 'Ready' : 'Not Available'}
+                        </div>
+                    `;
+                } else {
+                    statusDiv.innerHTML = `
+                        <div class="text-red-600">
+                            ❌ Service Unavailable - ${data.error}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('status').innerHTML = `
+                    <div class="text-red-600">
+                        ❌ Error checking status: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function loadPapers() {
+            try {
+                const response = await fetch('/api/papers');
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentPapers = data.papers;
+                    displayPapers();
+                } else {
+                    document.getElementById('papers-list').innerHTML = 
+                        '<div class="text-red-600">Failed to load papers</div>';
+                }
+            } catch (error) {
+                document.getElementById('papers-list').innerHTML = 
+                    `<div class="text-red-600">Error loading papers: ${error.message}</div>`;
+            }
+        }
+
+        function displayPapers() {
+            const papersDiv = document.getElementById('papers-list');
+            
+            if (currentPapers.length === 0) {
+                papersDiv.innerHTML = '<div class="text-gray-600">No papers available. Please search for papers first.</div>';
+                return;
+            }
+
+            papersDiv.innerHTML = currentPapers.map((paper, index) => `
+                <div class="flex items-center p-3 border rounded-lg hover:bg-gray-50">
+                    <input type="checkbox" 
+                           id="paper-${index}" 
+                           value="${index}"
+                           onchange="togglePaper(${index})"
+                           class="mr-3 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                    <label for="paper-${index}" class="flex-1 cursor-pointer">
+                        <div class="font-medium text-gray-900">${paper.title || 'Unknown Title'}</div>
+                        <div class="text-sm text-gray-600">
+                            ${paper.authors ? paper.authors.join(', ') : 'Unknown Authors'} | 
+                            ${paper.published || 'Unknown Date'}
+                        </div>
+                        <div class="text-xs text-gray-500">
+                            PDF: ${paper.pdf_path ? '✅ Available' : '❌ Not Downloaded'}
+                        </div>
+                    </label>
+                </div>
+            `).join('');
+        }
+
+        function togglePaper(index) {
+            const checkbox = document.getElementById(`paper-${index}`);
+            if (checkbox.checked) {
+                if (!selectedPapers.includes(index)) {
+                    selectedPapers.push(index);
+                }
+            } else {
+                selectedPapers = selectedPapers.filter(i => i !== index);
+            }
+            
+            updateCompareButton();
+        }
+
+        function updateCompareButton() {
+            const button = document.getElementById('compare-selected');
+            const status = document.getElementById('comparison-status');
+            
+            if (selectedPapers.length >= 2) {
+                button.disabled = false;
+                status.textContent = `${selectedPapers.length} papers selected for comparison`;
+            } else {
+                button.disabled = true;
+                status.textContent = selectedPapers.length === 1 ? 
+                    'Select at least one more paper for comparison' : 
+                    'Select at least 2 papers for comparison';
+            }
+        }
+
+        document.getElementById('compare-selected').addEventListener('click', async function() {
+            if (selectedPapers.length < 2) return;
+            
+            const button = this;
+            const status = document.getElementById('comparison-status');
+            
+            button.disabled = true;
+            button.textContent = 'Analyzing...';
+            status.textContent = 'Running comparative analysis...';
+            
+            try {
+                const response = await fetch('/api/analysis/compare', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        paper_indices: selectedPapers,
+                        output_dir: `analysis_${Date.now()}`
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    status.textContent = data.message;
+                    displayAnalysisResults(data.analysis_results);
+                    currentAnalysisDir = data.analysis_results.export_paths ? 
+                        Object.values(data.analysis_results.export_paths)[0].split('/')[0] : null;
+                } else {
+                    status.textContent = `Error: ${data.detail || 'Analysis failed'}`;
+                }
+                
+            } catch (error) {
+                status.textContent = `Error: ${error.message}`;
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Compare Selected Papers';
+            }
+        });
+
+        document.getElementById('compare-files').addEventListener('click', async function() {
+            const pdfPaths = document.getElementById('pdf-paths').value
+                .split('\n')
+                .map(path => path.trim())
+                .filter(path => path.length > 0);
+            
+            if (pdfPaths.length < 2) {
+                document.getElementById('file-comparison-status').textContent = 
+                    'Please enter at least 2 PDF file paths';
+                return;
+            }
+            
+            const button = this;
+            const status = document.getElementById('file-comparison-status');
+            
+            button.disabled = true;
+            button.textContent = 'Analyzing...';
+            status.textContent = 'Running comparative analysis...';
+            
+            try {
+                const response = await fetch('/api/analysis/compare-files', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        pdf_paths: pdfPaths,
+                        output_dir: `analysis_${Date.now()}`
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    status.textContent = data.message;
+                    displayAnalysisResults(data.analysis_results);
+                    currentAnalysisDir = data.analysis_results.export_paths ? 
+                        Object.values(data.analysis_results.export_paths)[0].split('/')[0] : null;
+                } else {
+                    status.textContent = `Error: ${data.detail || 'Analysis failed'}`;
+                }
+                
+            } catch (error) {
+                status.textContent = `Error: ${error.message}`;
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Compare PDF Files';
+            }
+        });
+
+        function displayAnalysisResults(results) {
+            try {
+                const resultsSection = document.getElementById('results-section');
+                resultsSection.classList.remove('hidden');
+                
+                // Display summary
+                const summaryDiv = document.getElementById('analysis-summary');
+                let summaryText = '';
+                
+                if (results.paper_summaries && Array.isArray(results.paper_summaries)) {
+                    // New format with paper summaries
+                    summaryText = results.paper_summaries.map((paper, index) => `
+                        <div class="mb-4 p-4 border-l-4 border-blue-500 bg-blue-50">
+                            <h4 class="font-bold text-lg mb-2">Paper ${index + 1}: ${paper.title}</h4>
+                            <p class="mb-2"><strong>Summary:</strong> ${paper.summary}</p>
+                            <p class="mb-2"><strong>Key Strengths:</strong> ${paper.key_strengths}</p>
+                            <p class="mb-2"><strong>Key Limitations:</strong> ${paper.key_limitations}</p>
+                        </div>
+                    `).join('');
+                } else if (results.summary) {
+                    if (typeof results.summary === 'string') {
+                        summaryText = results.summary;
+                    } else if (results.summary.text) {
+                        summaryText = results.summary.text;
+                    } else {
+                        summaryText = 'Summary data available but not in expected format';
+                    }
+                } else {
+                    summaryText = 'No summary available';
+                }
+                
+                summaryDiv.innerHTML = summaryText;
+                
+                // Display comparison table
+                const tableDiv = document.getElementById('comparison-table');
+                if (results.html_table) {
+                    // Direct access to html_table (new format)
+                    tableDiv.innerHTML = results.html_table;
+                } else if (results.comparison && results.comparison.html_table) {
+                    // Nested access for backward compatibility
+                    tableDiv.innerHTML = results.comparison.html_table;
+                } else {
+                    tableDiv.innerHTML = '<p class="text-gray-600">No comparison table available</p>';
+                }
+                
+                // Display visualizations
+                const vizDiv = document.getElementById('visualizations');
+                const visualizations = results.visualizations || {};
+                
+                if (Object.keys(visualizations).length > 0) {
+                    vizDiv.innerHTML = Object.entries(visualizations)
+                        .filter(([key, path]) => key !== 'error' && path)
+                        .map(([key, path]) => `
+                            <div class="text-center">
+                                <h4 class="font-medium mb-2">${(key || '').toString().replace(/_/g, ' ').toUpperCase()}</h4>
+                                <img src="/static/${path.split('/').pop()}" 
+                                     alt="${key}" 
+                                     class="w-full h-auto border rounded-lg shadow-sm">
+                            </div>
+                        `).join('');
+                } else {
+                    vizDiv.innerHTML = '<p class="text-gray-600">No visualizations available</p>';
+                }
+                
+                // Display download links
+                displayDownloadLinks(results);
+                
+            } catch (error) {
+                console.error('Error displaying analysis results:', error);
+                alert('Failed to display analysis results: ' + error.message);
+            }
+        }
+
+        function displayDownloadLinks(results) {
+            const linksDiv = document.getElementById('download-links');
+            
+            if (!currentAnalysisDir) {
+                linksDiv.innerHTML = '<p class="text-gray-600">Download links not available</p>';
+                return;
+            }
+            
+            const downloadTypes = [
+                { type: 'json', label: 'JSON Results' },
+                { type: 'markdown', label: 'Markdown Report' },
+                { type: 'csv', label: 'CSV Table' },
+                { type: 'metrics_plot', label: 'Metrics Plot' },
+                { type: 'dataset_plot', label: 'Dataset Plot' }
+            ];
+            
+            linksDiv.innerHTML = downloadTypes.map(item => `
+                <a href="/api/analysis/download/${currentAnalysisDir}/${item.type}"
+                   target="_blank"
+                   class="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-lg hover:bg-blue-200 text-sm">
+                    📥 ${item.label}
+                </a>
+            `).join('');
+        }
+    </script>
+</body>
+</html>
